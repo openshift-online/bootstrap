@@ -6,6 +6,7 @@ metadata:
 spec:
   destination:
     name: in-cluster
+    namespace: vault
   project: default
   source:
     path: ''
@@ -23,3 +24,5 @@ spec:
     automated:
       prune: false
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
