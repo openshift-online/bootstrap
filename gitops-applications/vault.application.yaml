@@ -6,14 +6,13 @@ metadata:
 spec:
   destination:
     name: in-cluster
-    project: default
+  project: default
   source:
     path: ''
     repoURL: https://helm.releases.hashicorp.com
     targetRevision: 0.30.0
     chart: vault
   sources: []
-  project: default
   syncPolicy:
     automated:
       prune: false
