@@ -1,147 +1,167 @@
 # How to Reuse This Repository
 
-This repository is designed for **reuse**. You clone it, bootstrap your hub cluster, and it automatically sets up internal infrastructure for managing additional clusters.
+This repository uses a **base + fork** pattern for managing multi-cluster infrastructure at scale.
 
-## Two-Phase Reuse Pattern
+## Repository Strategy
 
-### Phase 1: Bootstrap from GitHub
+**Upstream (bootstrap):** https://github.com/openshift-online/bootstrap
+- Shared reusable templates in `bases/`
+- Hub cluster operators (`operators/{name}/global/`)
+- Common patterns everyone benefits from
+
+**Fork (bootstrap-clm):** https://github.com/openshift-online/bootstrap-clm
+- Your specific cluster definitions (`regions/`, `clusters/`)
+- Instance-specific configurations (`operators/{name}/{cluster}/`)
+- Private deployment settings
+
+## Directory Structure
+
+```
+bootstrap/
+├── bases/                       # Reusable templates (upstream)
+│   ├── clusters/ocp/           # OpenShift base templates
+│   ├── clusters/eks/           # AWS EKS templates
+│   ├── clusters/gcp/           # GCP GKE templates (future)
+│   └── pipelines/              # Pipeline templates
+├── regions/                     # Define clusters here (fork)
+│   └── us-west-2/
+│       └── my-cluster/
+│           └── region.yaml
+├── clusters/                    # Auto-generated instances
+├── operators/                   # Operator deployments
+│   └── {name}/
+│       ├── global/             # Hub cluster instance
+│       └── {cluster}/          # Managed cluster instances
+├── pipelines/                   # Pipeline deployments
+│   └── {name}/
+│       ├── global/             # Hub pipelines
+│       └── {cluster}/          # Cluster-specific pipelines
+└── bin/                         # Management tools
+```
+
+## Bootstrap the Hub Cluster
+
 ```bash
-# 1. Clone this repository
+# Clone and bootstrap
 git clone https://github.com/openshift-online/bootstrap.git
 cd bootstrap
 
-# 2. Log into your OpenShift cluster
-oc login https://api.your-hub-cluster.example.com:6443
-
-# 3. Bootstrap the hub cluster
+oc login https://api.your-hub.example.com:6443
 oc apply -k operators/openshift-gitops/global
 oc apply -k gitops-applications/
 ```
 
-**What this does:**
-- Installs OpenShift GitOps (ArgoCD)
-- Deploys Advanced Cluster Management (ACM) 
-- Sets up Vault for secret management
-- Installs internal Gitea service
-- Creates pipeline infrastructure
+**Hub installs:**
+- OpenShift GitOps (ArgoCD)
+- Advanced Cluster Management (ACM)
+- OpenShift Pipelines (Tekton)
+- Vault (secret management)
 
-### Phase 2: Self-Referential Management
-After bootstrap completes, the cluster becomes **self-managing**:
-
-- **External GitHub**: Used only for initial bootstrap deployment
-- **Internal Gitea**: Used for ongoing cluster-specific configuration
-- **Self-Referential**: New clusters reference their own internal Git service
-
-The cluster automatically:
-1. Clones this repository to internal Gitea
-2. Switches ArgoCD to use internal Gitea for cluster-specific configs
-3. Provisions new clusters using internal Git as source
-
-## Directory Structure for Reuse
-
-```
-bootstrap/
-├── regions/                     # Start here: Define new clusters
-│   └── us-east-1/
-│       └── my-cluster/
-│           └── region.yaml      # Cluster specification
-├── 
-├── gitops-applications/         # ArgoCD ApplicationSets
-├── operators/                   # Hub cluster operators
-├── bases/                       # Reusable templates
-└── bin/                         # Management tools
-```
-
-## Adding Your First Cluster
-
-Once bootstrap is complete:
+## Add Your First Cluster
 
 ```bash
-# 1. Create cluster specification
 ./bin/cluster-create
 
-# Follow prompts to specify:
-# - Cluster name: my-first-cluster
-# - Type: ocp (OpenShift) or eks (EKS)
-# - Region: us-east-1
+# Prompts:
+# - Cluster name: my-cluster
+# - Type: ocp or eks
+# - Region: us-west-2
 # - Instance type: m5.2xlarge
 
-# 2. Generate cluster configuration
-# (automatically called by cluster-create)
-
-# 3. Commit and push changes
 git add .
-git commit -m "Add my-first-cluster"
+git commit -m "Add my-cluster"
 git push origin main
 ```
 
-The system automatically:
-- ✅ Creates cluster provisioning resources
-- ✅ Generates pipeline deployments  
-- ✅ Sets up operator installations
-- ✅ Configures service deployments
-- ✅ Creates ArgoCD applications with proper ordering
+ArgoCD automatically:
+- Creates cluster provisioning resources
+- Generates operator installations
+- Deploys pipelines
+- Configures proper sync ordering
 
-## How Self-Reference Works
+## How Bases Work
 
-**Initial Bootstrap** (GitHub):
+Each cluster instance references shared bases:
+
 ```yaml
-# gitops-applications use GitHub
-source:
-  repoURL: 'https://github.com/openshift-online/bootstrap'
+# clusters/my-cluster/kustomization.yaml
+resources:
+  - ../../bases/clusters/ocp/    # Reuses OpenShift base
+
+patches:
+  - region: us-west-2             # Adds instance config
+    instanceType: m5.2xlarge
 ```
 
-**Ongoing Management** (Internal Gitea):
-```yaml
-# Cluster-specific configs use internal Gitea
-source:
-  repoURL: 'http://gitea.gitea-system.svc.cluster.local:3000/myadmin/bootstrap.git'
+## Multi-Cloud Support
+
+**Current:**
+- `bases/clusters/ocp/` - OpenShift on AWS/Azure/GCP/bare metal (via ACM)
+- `bases/clusters/eks/` - AWS EKS
+
+**Future:**
+- `bases/clusters/gcp/` - GCP GKE
+- `bases/clusters/oci/` - Oracle OKE
+- `bases/clusters/aks/` - Azure AKS
+
+## Scaling Pattern
+
+To deploy operators/pipelines across N clusters:
+
+1. Define cluster in `regions/{region}/{name}/region.yaml`
+2. Run `./bin/cluster-create` (generates instances)
+3. Commit and push
+4. ArgoCD deploys everything
+
+**Result:**
+```
+operators/openshift-pipelines/cluster-01/
+operators/openshift-pipelines/cluster-02/
+pipelines/hello-world/cluster-01/
+pipelines/hello-world/cluster-02/
 ```
 
-This allows:
-- **Reuse**: Multiple teams can use the same base GitHub repo
-- **Isolation**: Each cluster has its own internal Git with specific configs
-- **Independence**: Clusters manage themselves without external dependencies
+All reference same `bases/`, customized per cluster.
 
-## Monitoring Your Deployment
+## Monitoring
 
 ```bash
-# Check ArgoCD applications
+# Check applications
 oc get applications -n openshift-gitops
 
-# Monitor cluster provisioning
-oc get clusterdeployments -A     # OpenShift clusters
-oc get clusters -A               # EKS clusters
+# Monitor clusters
+oc get clusterdeployments -A     # OpenShift
+oc get clusters -A               # EKS
 
-# Check hub cluster health
+# Health check
 ./bin/monitor-health
 ```
 
-## Access Management Interfaces
+## Management Consoles
 
 ```bash
-# ArgoCD console
-echo "ArgoCD: https://$(oc get route openshift-gitops-server -n openshift-gitops -o jsonpath='{.spec.host}')"
+# ArgoCD
+oc get route openshift-gitops-server -n openshift-gitops
 
-# ACM console  
-echo "ACM: https://$(oc get route multicloud-console -n open-cluster-management -o jsonpath='{.spec.host}')"
+# ACM
+oc get route multicloud-console -n open-cluster-management
 
-# Gitea console
-echo "Gitea: https://$(oc get route gitea -n gitea-system -o jsonpath='{.spec.host}')"
+# Vault
+oc get route vault -n vault
 ```
 
-## Customization
+## Contributing Back
 
-The repository supports customization through:
+**Fork changes** (your deployments) stay private.
 
-- **Region specifications**: Define cluster requirements in `regions/`
-- **Base templates**: Modify shared components in `bases/`
-- **Operator configurations**: Customize deployments in `operators/`
-- **Pipeline definitions**: Add custom workflows in `pipelines/`
+**Base improvements** (templates, operators) can be contributed upstream:
+1. Improve `bases/` in your fork
+2. PR to upstream bootstrap repo
+3. Everyone benefits from shared patterns
 
 ## Support
 
-- **Quick Start**: [docs/getting-started/QUICKSTART.md](./docs/getting-started/QUICKSTART.md)
-- **Architecture**: [docs/architecture/ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)
-- **Bootstrap Details**: [BOOTSTRAP.md](./BOOTSTRAP.md)
-- **Navigation Guide**: [NAVIGATION.md](./NAVIGATION.md)
+- [QUICKSTART.md](./docs/getting-started/QUICKSTART.md) - Quick start guide
+- [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md) - Visual diagrams
+- [BOOTSTRAP.md](./BOOTSTRAP.md) - Bootstrap details
+- [NAVIGATION.md](./NAVIGATION.md) - Repository navigation
