@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault-helm
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    external-repo: "true"
+
+spec:
+  destination:
+    name: in-cluster
+    namespace: vault
+  project: default
+  source:
+    path: ''
+    repoURL: https://helm.releases.hashicorp.com
+    targetRevision: 0.30.0
+    chart: vault
+    helm:
+      parameters:
+        - name: global.openshift
+          value: "true"
+        - name: server.dev.enabled
+          value: "true"
+        - name: server.image.repository
+          value: "docker.io/hashicorp/vault"
+        - name: injector.image.repository
+          value: "docker.io/hashicorp/vault-k8s"
+        - name: injector.affinity
+          value: ""
+        - name: server.affinity
+          value: ""
+  sources: []
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault-init
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+
+spec:
+  destination:
+    name: in-cluster
+    namespace: vault
+  project: default
+  source:
+    repoURL: https://github.com/openshift-online/bootstrap-hyperfleet
+    path: clusters/global/operators/vault
+    targetRevision: HEAD
+  sources: []
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

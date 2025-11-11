@@ -2,45 +2,46 @@
 
 ## Overview
 
-This document describes the current GitOps and Kustomize patterns used in the OpenShift Bootstrap repository. The architecture follows a **hub-spoke model** with **Application-level sync wave orchestration** and **self-referential management**.
+This document describes the current GitOps and Kustomize patterns used in the OpenShift Bootstrap repository. The architecture follows a **hub-spoke model** with **Application-level sync wave orchestration** and **declarative cluster lifecycle management**.
 
 ## Current Directory Structure
 
 ```
 bootstrap/
-├── gitops-applications/            # ArgoCD Applications and ApplicationSets
-│   ├── global/                     # Hub cluster applications
-│   │   ├── openshift-gitops/       # Self-managing GitOps
-│   │   ├── advanced-cluster-management/  # ACM ApplicationSet
-│   │   ├── openshift-pipelines-operator/ # Tekton operator
-│   │   ├── vault/                  # Secret management
-│   │   ├── eso/                    # External Secrets Operator
-│   │   ├── gitea/                  # Internal Git service
-│   │   └── cluster-bootstrap/      # Bootstrap coordination
-│   └── clusters/                   # Self-referential ApplicationSets
-│       └── cluster-bootstrap-applicationset.yaml
-│
-├── operators/                      # Operator deployments by type and target
-│   ├── openshift-gitops/global/    # GitOps operator installation
-│   ├── advanced-cluster-management/global/  # ACM operator and hub
-│   ├── openshift-pipelines/global/ # Pipelines operator (hub)
-│   ├── vault/global/               # Vault deployment
-│   └── external-secrets/global/    # ESO deployment
-│
-├── clusters/                       # Generated cluster provisioning configs
-│   ├── my-cluster/                 # OCP cluster (auto-generated from regions/)
-│   └── eks-cluster/                # EKS cluster (auto-generated from regions/)
-│
-├── regions/                        # Regional cluster specifications (input)
-│   ├── us-east-1/my-cluster/      # Simple region.yaml format
-│   └── ap-southeast-1/eks-cluster/ # Minimal cluster specification
-│
-├── pipelines/                      # Tekton pipeline definitions
-│   ├── cluster-bootstrap/global/   # Cluster preparation pipelines
-│   └── hub-provisioner/global/     # Cluster creation workflows
-│
-├── deployments/                    # Service deployments
-│   └── ocm/                        # OpenShift Cluster Manager services
+├── clusters/
+│   ├── global/                     # Hub cluster configuration
+│   │   ├── operators/              # Hub cluster operators
+│   │   │   ├── openshift-gitops/   # GitOps operator installation
+│   │   │   ├── advanced-cluster-management/  # ACM operator and hub
+│   │   │   ├── openshift-pipelines/# Pipelines operator (hub)
+│   │   │   ├── vault/              # Vault deployment
+│   │   │   └── external-secrets/   # ESO deployment
+│   │   ├── pipelines/              # Hub cluster pipelines
+│   │   │   ├── cluster-bootstrap/  # Cluster preparation pipelines
+│   │   │   └── hub-provisioner/    # Cluster creation workflows
+│   │   └── gitops/                 # Hub cluster GitOps applications
+│   │       ├── openshift-gitops/   # Self-managing GitOps
+│   │       ├── advanced-cluster-management/  # ACM ApplicationSet
+│   │       ├── openshift-pipelines-operator/ # Tekton operator
+│   │       ├── vault/              # Secret management
+│   │       ├── eso/                # External Secrets Operator
+│   │       └── cluster-bootstrap/  # Bootstrap coordination
+│   │
+│   ├── my-cluster/                 # Managed cluster
+│   │   ├── my-cluster.yaml         # Cluster specification
+│   │   ├── cluster/                # OCP cluster provisioning resources
+│   │   ├── operators/              # Cluster-specific operators
+│   │   ├── pipelines/              # Cluster-specific pipelines
+│   │   ├── deployments/            # Cluster-specific deployments (OCM services)
+│   │   └── gitops/                 # Cluster-specific GitOps applications
+│   │
+│   └── eks-cluster/                # Another managed cluster
+│       ├── eks-cluster.yaml        # Cluster specification
+│       ├── cluster/                # EKS cluster provisioning resources
+│       ├── operators/
+│       ├── pipelines/
+│       ├── deployments/
+│       └── gitops/
 │
 └── bases/                          # Reusable Kustomize templates
     ├── clusters/                   # Cluster provisioning templates
@@ -51,7 +52,7 @@ bootstrap/
 
 ### Main Kustomization
 
-The root GitOps kustomization (`gitops-applications/kustomization.yaml`) manages hub cluster applications:
+The root GitOps kustomization (`clusters/global/gitops/kustomization.yaml`) manages hub cluster applications:
 
 **Key Applications:**
 - **OpenShift GitOps** (Wave -1): Self-managing ArgoCD
@@ -59,7 +60,7 @@ The root GitOps kustomization (`gitops-applications/kustomization.yaml`) manages
 - **Vault + ESO** (Wave 2): Secret management
 - **ACM ApplicationSet** (Wave 3): Multi-cluster management with internal ordering
 - **GitOps Integration** (Wave 4): Cluster integration and metrics
-- **Gitea + Bootstrap** (Wave 5): Internal Git and self-referential provisioning
+- **Hub Provisioner** (Wave 5): Cluster lifecycle automation pipelines
 
 ### Application-Level Sync Wave Strategy
 
@@ -75,7 +76,7 @@ spec:
   destination:
     name: in-cluster
   source:
-    path: operators/openshift-gitops/global
+    path: clusters/global/operators/openshift-gitops
 
 # Example: ACM ApplicationSet (ordered internal waves)
 apiVersion: argoproj.io/v1alpha1
@@ -96,39 +97,38 @@ spec:
         syncWave: "4"    # Internal ordering
 ```
 
-### Self-Referential ApplicationSet
+### Cluster ApplicationSets
 
-The cluster bootstrap ApplicationSet uses internal Gitea instead of external GitHub:
+Cluster-specific ApplicationSets manage cluster lifecycle:
 
 ```yaml
-# gitops-applications/clusters/cluster-bootstrap-applicationset.yaml
+# Example: Provisioning ApplicationSet
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: cluster-bootstrap-internal
+  name: ocp-456-provisioning
   annotations:
-    argocd.argoproj.io/sync-wave: "20"
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   generators:
-  - clusters:
-      selector:
-        matchLabels:
-          cluster-type: internal
+  - list:
+      elements:
+      - component: cluster
+        path: clusters/ocp-456/cluster
   template:
     spec:
       source:
-        # Self-referential: points to internal Gitea
-        repoURL: 'http://gitea.gitea-system.svc.cluster.local:3000/myadmin/bootstrap.git'
-        path: 'clusters/{{name}}'
+        repoURL: 'https://github.com/openshift-online/bootstrap-hyperfleet'
+        path: '{{path}}'
 ```
 
 ## Cluster Provisioning Layer
 
-### Regional Specification to Overlay Generation
+### Cluster Specification to Overlay Generation
 
-**Input**: Simple regional specifications
+**Input**: Simple cluster specifications
 ```yaml
-# regions/us-east-1/my-cluster/region.yaml
+# clusters/my-cluster/my-cluster.yaml
 apiVersion: regional.openshift.io/v1
 kind: RegionalCluster
 metadata:
@@ -145,7 +145,7 @@ spec:
 
 **Output**: Generated cluster overlay
 ```
-clusters/my-cluster/
+clusters/my-cluster/cluster/
 ├── namespace.yaml                 # Cluster namespace
 ├── install-config.yaml           # OpenShift installation config
 ├── klusterletaddonconfig.yaml    # ACM agent configuration
@@ -166,12 +166,12 @@ clusters/my-cluster/
 **Current approach** eliminates complex JSON patches in favor of direct configuration:
 
 ```yaml
-# clusters/my-cluster/kustomization.yaml (simplified)
+# clusters/my-cluster/cluster/kustomization.yaml (simplified)
 resources:
   - namespace.yaml
   - install-config.yaml  
   - klusterletaddonconfig.yaml
-  - ../../bases/clusters
+  - ../../../bases/clusters
 
 # No patches - configuration is direct
 ```
@@ -180,7 +180,7 @@ resources:
 
 ### Hub Cluster Operators
 
-**Structure**: `operators/{operator-name}/global/`
+**Structure**: `clusters/global/operators/{operator-name}/`
 - **OpenShift GitOps**: Self-managing operator installation
 - **ACM**: ApplicationSet with ordered deployment (Operator → Hub → Policies)
 - **Vault**: Secret management deployment
@@ -191,7 +191,7 @@ resources:
 
 Each operator follows consistent structure:
 ```
-operators/{operator-name}/global/
+clusters/global/operators/{operator-name}/
 ├── operator/                      # Operator installation
 │   ├── namespace.yaml
 │   └── subscription.yaml
@@ -212,7 +212,7 @@ operators/{operator-name}/global/
 
 Pipelines are deployed per target:
 ```
-pipelines/{pipeline-name}/global/
+clusters/global/pipelines/{pipeline-name}/
 ├── {pipeline-name}.pipeline.yaml
 ├── {pipeline-name}.pipelinerun.yaml
 └── kustomization.yaml
@@ -255,14 +255,14 @@ spec:
 - **No resource-level sync waves**: Simplifies individual resources
 - **ApplicationSet for complex deployments**: ACM uses internal wave ordering
 
-### 2. **Regional Specification Simplicity**
-- **Single file per cluster**: All configuration in region.yaml
+### 2. **Cluster Specification Simplicity**
+- **Single file per cluster**: All configuration in {cluster-name}.yaml
 - **Auto-generation**: Complex overlays generated from simple specs
 - **Template reuse**: Base templates eliminate duplication
 
-### 3. **Self-Referential Management**
-- **Two-phase bootstrap**: GitHub for initial, Gitea for ongoing
-- **Internal Git service**: Clusters manage themselves
+### 3. **GitOps Cluster Management**
+- **Declarative**: All cluster config in Git
+- **ArgoCD-driven**: Continuous reconciliation
 - **Reuse-friendly**: Same base repo, cluster-specific configurations
 
 ### 4. **Secure Secret Management**
@@ -271,7 +271,7 @@ spec:
 - **Credential rotation**: Vault enables secret rotation
 
 ### 5. **Consistent Operator Management**
-- **Semantic naming**: `{operator-name}/{target}` pattern
+- **Semantic naming**: `clusters/{target}/operators/{operator-name}` pattern
 - **Ordered deployment**: ApplicationSets handle complex dependencies
 - **Self-managing**: GitOps operator manages itself
 
@@ -281,29 +281,29 @@ spec:
 
 ```bash
 # Validate all GitOps applications
-oc kustomize gitops-applications/
+oc kustomize clusters/global/gitops/
 
 # Validate cluster overlays
-oc kustomize clusters/my-cluster/
+oc kustomize clusters/my-cluster/cluster/
 
 # Validate operator configurations  
-oc kustomize operators/advanced-cluster-management/global/
+oc kustomize clusters/global/operators/advanced-cluster-management/
 
 # Validate pipeline configurations
-oc kustomize pipelines/cluster-bootstrap/global/
+oc kustomize clusters/global/pipelines/cluster-bootstrap/
 ```
 
 ### Dry-Run Testing
 
 ```bash
 # Test cluster provisioning without deployment
-oc --dry-run=client apply -k clusters/my-cluster/
+oc --dry-run=client apply -k clusters/my-cluster/cluster/
 
 # Test operator deployment
-oc --dry-run=client apply -k operators/vault/global/
+oc --dry-run=client apply -k clusters/global/operators/vault/
 
 # Test complete GitOps application deployment
-oc --dry-run=client apply -k gitops-applications/
+oc --dry-run=client apply -k clusters/global/gitops/
 ```
 
 ## Operational Procedures
@@ -312,10 +312,10 @@ oc --dry-run=client apply -k gitops-applications/
 
 ```bash
 # 1. Install GitOps operator
-oc apply -k operators/openshift-gitops/global
+oc apply -k clusters/global/operators/openshift-gitops
 
 # 2. Deploy all applications with sync wave ordering
-oc apply -k gitops-applications/
+oc apply -k clusters/global/gitops/
 
 # 3. Monitor deployment progress
 oc get applications -n openshift-gitops
@@ -324,14 +324,14 @@ oc get applications -n openshift-gitops
 ### Adding New Clusters
 
 ```bash
-# 1. Create regional specification
+# 1. Create cluster specification
 ./bin/cluster-create
 
 # 2. Generate cluster overlay (automatic)
-./bin/cluster-generate regions/us-east-1/new-cluster/
+./bin/cluster-generate clusters/new-cluster/new-cluster.yaml
 
 # 3. Commit and deploy via GitOps
-git add regions/ clusters/
+git add clusters/
 git commit -m "Add new-cluster"
 git push origin main
 ```
@@ -340,13 +340,13 @@ git push origin main
 
 ```bash
 # 1. Modify operator configuration
-vim operators/vault/global/configuration/vault.yaml
+vim clusters/global/operators/vault/configuration/vault.yaml
 
 # 2. Validate changes
-oc kustomize operators/vault/global/
+oc kustomize clusters/global/operators/vault/
 
 # 3. Deploy via GitOps
-git add operators/vault/
+git add clusters/global/operators/vault/
 git commit -m "Update Vault configuration"
 git push origin main
 ```
@@ -363,7 +363,7 @@ git push origin main
 
 ### Benefits Achieved
 
-- **77% reduction** in configuration complexity (regional specs vs overlays)
+- **77% reduction** in configuration complexity (cluster specs vs overlays)
 - **Eliminated patch debugging** through direct configuration
 - **Simplified dependency management** via Application sync waves
 - **Secure secret handling** with no credentials in Git
@@ -372,7 +372,7 @@ git push origin main
 ## Related Documentation
 
 - **[Architecture Overview](./ARCHITECTURE.md)** - Complete system architecture
-- **[Regional Specifications](./REGIONALSPEC.md)** - Cluster definition patterns
+- **[Cluster Specifications](./REGIONALSPEC.md)** - Cluster definition patterns
 - **[Namespace Architecture](./NAMESPACE.md)** - Multi-cluster namespace strategy
 - **[Bootstrap Walkthrough](../../BOOTSTRAP.md)** - Step-by-step deployment guide
 - **[Cluster Creation Guide](../../guides/cluster-creation.md)** - End-to-end workflow

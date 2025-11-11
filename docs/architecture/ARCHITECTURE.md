@@ -1,12 +1,12 @@
 # OpenShift Bootstrap Architecture
 
-## Two-Phase Bootstrap Pattern
+## Bootstrap Architecture
 
-### Phase 1: Bootstrap from GitHub
+### Phase 1: Initial Bootstrap
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                          EXTERNAL BOOTSTRAP (GitHub)                               │
-│                            oc apply -k gitops-applications/                        │
+│                            oc apply -k clusters/global/gitops/                     │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                     │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐                  │
@@ -24,26 +24,26 @@
 │  └─────────────────┘    └─────────────────┘    └─────────────────┘                  │
 │                                                                                     │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐                  │
-│  │    Tekton       │    │     Gitea       │    │  Cluster        │                  │
-│  │   Pipelines     │    │ Internal Git    │    │ Bootstrap       │                  │
+│  │    Tekton       │    │ Hub Provisioner │    │  Cluster        │                  │
+│  │   Pipelines     │    │   Pipelines     │    │   Management    │                  │
 │  │                 │    │                 │    │                 │                  │
 │  │ ┌─────────────┐ │    │ ┌─────────────┐ │    │ ┌─────────────┐ │                  │
-│  │ │Hub Cluster  │ │    │ │Self-Ref     │ │    │ │Pipeline for │ │                  │
-│  │ │ Pipelines   │ │    │ │Repository   │ │    │ │Cluster Prov │ │                  │
+│  │ │Hub Cluster  │ │    │ │Cluster      │ │    │ │ApplicationS │ │                  │
+│  │ │ Pipelines   │ │    │ │Provisioning │ │    │ │    ets      │ │                  │
 │  │ │             │ │    │ │             │ │    │ │             │ │                  │
-│  │ │Global Oper. │ │    │ │Bootstrap    │ │    │ │Hub Provision│ │                  │
-│  │ │Installation │ │    │ │Clone        │ │    │ │  Workflows  │ │                  │
+│  │ │Global Oper. │ │    │ │Automated    │ │    │ │Multi-Cluster│ │                  │
+│  │ │Installation │ │    │ │Workflows    │ │    │ │  Lifecycle  │ │                  │
 │  │ └─────────────┘ │    │ └─────────────┘ │    │ └─────────────┘ │                  │
 │  └─────────────────┘    └─────────────────┘    └─────────────────┘                  │
 └─────────────────────────────────────────────────────────────────────────────────────┘
                                           │
-                                          │ Self-Reference Transition
+                                          │ GitOps Reconciliation
                                           │
-### Phase 2: Self-Referential Management (Internal Gitea)
+### Phase 2: Cluster Lifecycle Management
                                           ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                       SELF-REFERENTIAL CLUSTER MANAGEMENT                          │
-│                     http://gitea.gitea-system.svc.cluster.local:3000               │
+│                       ARGOCD CLUSTER LIFECYCLE MANAGEMENT                          │
+│                     Declarative GitOps-based Provisioning                          │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                     │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐    │
@@ -141,12 +141,12 @@ Wave 4: GitOps Integration & Configuration
 └─────────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
-Wave 5: Internal Services & Self-Reference
+Wave 5: Hub Provisioner Pipelines
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│ Gitea + Cluster Bootstrap                                                      │
-│ • Internal Gitea service for self-referential repository                       │
-│ • Cluster Bootstrap ApplicationSet (references internal Gitea)                 │
-│ • Self-referential cluster provisioning capability                             │
+│ Hub Provisioner Pipeline Infrastructure                                        │
+│ • Tekton pipelines for cluster provisioning automation                         │
+│ • Cluster lifecycle management workflows                                       │
+│ • Automated cluster creation and deletion                                      │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -185,56 +185,50 @@ Hub Cluster ApplicationSet
 ### Current Directory Organization
 ```
 bootstrap/
-├── regions/                        # ✅ Regional cluster specifications (input)
-│   ├── us-east-1/
-│   │   ├── my-cluster/             # Simple region.yaml format
-│   │   └── prod-api/               # Minimal cluster configuration
-│   ├── us-west-2/
-│   │   └── staging-cluster/
-│   └── ap-southeast-1/
-│       └── eks-cluster/
+├── clusters/
+│   ├── global/                     # Hub cluster configuration
+│   │   ├── operators/              # Hub cluster operators
+│   │   │   ├── openshift-gitops/   # Self-managing GitOps operator
+│   │   │   ├── advanced-cluster-management/  # ACM ApplicationSet
+│   │   │   ├── openshift-pipelines/# Pipelines hub deployment
+│   │   │   ├── vault/              # Vault secret management
+│   │   │   └── external-secrets/   # ESO for secret sync
+│   │   ├── pipelines/              # Hub cluster pipelines
+│   │   │   ├── cluster-bootstrap/  # Bootstrap pipelines
+│   │   │   └── hub-provisioner/    # Cluster provisioning pipelines
+│   │   └── gitops/                 # Hub cluster GitOps applications
+│   │       ├── openshift-gitops/   # Self-managing GitOps
+│   │       ├── advanced-cluster-management/  # ACM ApplicationSet
+│   │       ├── vault/              # Vault application
+│   │       ├── eso/                # ESO application
+│   │       └── cluster-bootstrap/  # Bootstrap application
+│   │
+│   ├── my-cluster/                 # Managed cluster configuration
+│   │   ├── my-cluster.yaml         # Cluster specification
+│   │   ├── cluster/                # Cluster provisioning resources
+│   │   ├── operators/              # Cluster-specific operators
+│   │   ├── pipelines/              # Cluster-specific pipelines
+│   │   ├── deployments/            # Cluster-specific deployments
+│   │   └── gitops/                 # Cluster-specific GitOps applications
+│   │
+│   └── eks-cluster/                # Another managed cluster
+│       ├── eks-cluster.yaml        # Cluster specification
+│       ├── cluster/                # EKS: CAPI resources
+│       ├── operators/
+│       ├── pipelines/
+│       ├── deployments/
+│       └── gitops/
 │
-├── clusters/                       # ✅ Generated cluster configs (auto-generated)
-│   ├── my-cluster/                 # OCP: Hive resources
-│   ├── prod-api/                   # OCP: Hive resources  
-│   ├── staging-cluster/            # OCP: Hive resources
-│   └── eks-cluster/                # EKS: CAPI resources
-│
-├── operators/                      # ✅ Operator deployments by type and target
-│   ├── openshift-gitops/global/    # Self-managing GitOps operator
-│   ├── advanced-cluster-management/global/  # ACM ApplicationSet
-│   ├── openshift-pipelines/global/ # Pipelines hub deployment
-│   ├── vault/global/               # Vault secret management
-│   └── external-secrets/global/    # ESO for secret sync
-│
-├── pipelines/                      # ✅ Tekton pipelines per cluster
-│   ├── cluster-bootstrap/global/   # Bootstrap pipelines
-│   └── hub-provisioner/global/     # Cluster provisioning pipelines
-│
-├── deployments/                    # ✅ Service deployments per cluster
-│   └── ocm/                        # OCM services (currently minimal)
-│
-├── gitops-applications/            # ✅ ArgoCD ApplicationSets and Applications
-│   ├── global/                     # Hub cluster applications
-│   │   ├── openshift-gitops/       # Self-managing GitOps
-│   │   ├── advanced-cluster-management/  # ACM ApplicationSet
-│   │   ├── vault/                  # Vault application
-│   │   ├── eso/                    # ESO application
-│   │   ├── gitea/                  # Internal Git service
-│   │   └── cluster-bootstrap/      # Bootstrap application
-│   └── clusters/                   # Self-referential cluster ApplicationSets
-│       └── cluster-bootstrap-applicationset.yaml  # Internal Gitea reference
-│
-└── bases/                          # ✅ Reusable templates
+└── bases/                          # Reusable templates
     ├── clusters/                   # Cluster provisioning templates
     └── pipelines/                  # Pipeline templates
 ```
 ## Key Architecture Features
 
-### 1. **Two-Phase Reuse Pattern**
-- **Phase 1**: External GitHub for initial bootstrap deployment
-- **Phase 2**: Internal Gitea for ongoing cluster-specific management
-- **Self-Referential**: Clusters manage themselves using internal Git service
+### 1. **GitOps-Based Management**
+- **Declarative**: All infrastructure defined in Git
+- **ArgoCD**: Continuous reconciliation of desired state
+- **ApplicationSets**: Automated cluster lifecycle management
 
 ### 2. **Application-Level Sync Wave Orchestration**
 - **8 sync waves** with proper dependency ordering
