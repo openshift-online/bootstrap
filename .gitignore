@@ -4,3 +4,15 @@
 .secrets/
 .tmp/
 secrets/
+
+# === Additional patterns for agent-readiness ===
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
