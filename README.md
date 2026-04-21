@@ -2,6 +2,13 @@
 
 **A reusable GitOps framework for multi-cluster management.** Clone this repository to instantly deploy a complete OpenShift hub cluster that can provision and manage regional clusters at scale.
 
+## Quick Start
+
+```bash
+make lint        # Run shellcheck on scripts
+make help        # Show available targets
+```
+
 ## Quick Reuse
 
 ```bash
